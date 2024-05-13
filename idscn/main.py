@@ -11,7 +11,12 @@ from tqdm import trange
 import seaborn as sns
 import matplotlib.colors as mcolors
 
-
+# 整理数据，方便后续计算
+# 输入原始数据（.csv文件，包括表型信息和体积指标，meta+data），得到patients.csv和controls.csv两个文件，其中只包含个体编号、协变量、脑区体积信息等后续要用的；
+# group_index：输入文件中，区分疾病和健康的一列的index；group_name：2个元素的列表，第一个为ctrl的名称（小鼠用'WT'），第二个为patient的名称（小鼠用'MUT'）。
+# cova_name: list，年龄、性别等协变量的column names；
+# region_name: list，脑区名称的column names；
+# 输出完成筛选和分类的数据。指定tp='0'，输出对照组和疾病组两个.csv文件。放在同一outpath，后续可以自动识别和计算IDSCN。
 def generate_dataset(filepath, outpath, group_name, group_index, cova_name, region_name=None, tp='0'):
     """
     This method will generate the control group and standard patient data (covariates in front
@@ -157,7 +162,8 @@ def read_dataset(filepath, tp, cova, region):
         pa = pd.concat([covas, regions], axis=1)
         return list(pati_subs), list(covas.columns.values), list(regions.columns.values), pa
 
-
+# input: covar names, region names, data;
+# output: partial correlation matrix (i.e. PCCn)
 def PCC(covas, regions, group):
     """
     This method will generate the partial correlation matrix (i.e. PCCn).
@@ -180,6 +186,7 @@ def PCC(covas, regions, group):
         assert isinstance(region, str), 'items in covas must be string.'
     assert isinstance(group, pd.DataFrame), 'ctrl_group must be a pandas.core.frame.DataFrame.'
 
+    # calculate partial_corr
     pcorr = []
     for r1 in regions:
         pcorr_col = []
@@ -246,7 +253,7 @@ def IDSCN(inpath, outpath, cova=None, region=None):
         outPath = outpath[:-1]
     if not os.path.exists(outPath) or os.path.isfile(outPath):
         os.makedirs(outPath)
-    ctrl_path = os.path.normpath(os.path.join(inpath, 'controls.csv'))
+    ctrl_path = os.path.normpath(os.path.join(inpath, 'controls.csv')) #规范路径，在Windows系统上将/替换为\
     pati_path = os.path.normpath(os.path.join(inpath, 'patients.csv'))
     print('Controls are in {}'.format(ctrl_path))
     print('Patients are in {}'.format(pati_path))
@@ -525,13 +532,13 @@ def SCN(inpath, outpath, cova=None, region=None, n_permutations=1000):
     PCCn = PCC(covas=ctrl[0], regions=ctrl[1], group=ctrl[2])
     PCCn_p = PCC(covas=pati[1], regions=pati[2], group=pati[3])
 
-    # ����seaborn��ʽ
+    # 设置seaborn样式
     sns.set(style='white')
-    # colors = ['darkblue', 'blue', 'green', 'darkorange', 'gold']  # �����̡���
+    # colors = ['darkblue', 'blue', 'green', 'darkorange', 'gold']  # 蓝、绿、橙
     # cmap = mcolors.LinearSegmentedColormap.from_list('cmap', colors)
 
     for t, r in [('rHC', PCCn), ('rMDD', PCCn_p)]:
-        # ������ͼ
+        # 创建热图
         fig, ax = plt.subplots(figsize=(14, 14), dpi=200)
         hmap = sns.heatmap(r, cmap="viridis", ax=ax,
                            xticklabels=ctrl[1],
@@ -540,18 +547,18 @@ def SCN(inpath, outpath, cova=None, region=None, n_permutations=1000):
                            annot=False, square=True,
                            vmin=-1, vmax=1)
 
-        cbar = hmap.collections[0].colorbar  # ��ʾcolorbar
-        cbar.ax.tick_params(labelsize=20)  # ����colorbar�̶������С��
+        cbar = hmap.collections[0].colorbar  # 显示colorbar
+        cbar.ax.tick_params(labelsize=20)  # 设置colorbar刻度字体大小。
 
-        # ��תx���ǩ
+        # 旋转x轴标签
         ax.set_xticklabels(ax.get_xticklabels(), rotation=-45, ha='left')
 
-        # ���ӱ���
+        # 添加标题
         plt.title(f'{t}')
 
         plt.tight_layout()
 
-        # ��ʾ��ͼ
+        # 显示热图
         plt.savefig(outPath + f'/{t}.jpg')
 
     diff_real = PCCn_p - PCCn
@@ -561,7 +568,7 @@ def SCN(inpath, outpath, cova=None, region=None, n_permutations=1000):
 
     g1g2 = pd.concat([ctrl[2], pati[3]])
 
-    # �����������ֵ
+    # 计算随机差异值
     print('calculating permutate difference ...')
     D_permuted = np.zeros((n_permutations, n, n))
     for i in trange(n_permutations, ncols=100):
@@ -572,10 +579,10 @@ def SCN(inpath, outpath, cova=None, region=None, n_permutations=1000):
         PCCn_p_per = PCC(covas=ctrl[0], regions=ctrl[1], group=g2_per)
         D_permuted[i] = PCCn_p_per - PCCn_per
     print('perm_diff done.')
-    # ��������֮��ı߲���
+    # 计算两组之间的边差异
     D_obs = np.abs(np.arctanh(PCCn) - np.arctanh(PCCn_p))
 
-    # ���� z ֵ����
+    # 计算 z 值矩阵
     z_matrix = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
@@ -583,7 +590,7 @@ def SCN(inpath, outpath, cova=None, region=None, n_permutations=1000):
             z_matrix[i, j] = z
             z_matrix[j, i] = z
 
-    # ���� FDR У���� p ֵ����
+    # 计算 FDR 校正的 p 值矩阵
     p_matrix = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
